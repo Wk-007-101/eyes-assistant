@@ -15,70 +15,79 @@
   }
   body { display: flex; flex-direction: column; }
 
-  /* พื้นที่กล้อง แตะที่ไหนก็ได้เพื่อให้พูด */
-  #tapArea {
-    position: relative; flex: 1; min-height: 0;
-    background: #111; overflow: hidden;
+  /* ชั้นเริ่มต้น กินเต็มจอ แตะตรงไหนก็ได้เพื่อเริ่ม */
+  #startLayer {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 24px; padding: 32px; text-align: center;
+    background: #0d47a1; cursor: pointer;
   }
-  #cam, #overlay {
-    position: absolute; inset: 0;
-    width: 100%; height: 100%; object-fit: cover;
-  }
-  #overlay { pointer-events: none; }
+  #startLayer h1 { margin: 0; font-size: 40px; }
+  #startLayer p  { margin: 0; font-size: 24px; line-height: 1.5; }
+  #startLayer .big { font-size: 64px; }
 
+  #tapArea { position: relative; flex: 1; min-height: 0; background: #111; overflow: hidden; }
+  #cam, #overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  #overlay { pointer-events: none; }
   #hint {
     position: absolute; left: 0; right: 0; top: 0;
     padding: 10px 14px; font-size: 15px;
     background: rgba(0,0,0,.55); text-align: center;
   }
 
-  /* แถบสถานะ ตัวใหญ่ อ่านง่าย คอนทราสต์สูง */
   #status {
     padding: 14px 16px; font-size: 22px; line-height: 1.4;
     background: #ffe600; color: #000; font-weight: 700;
     min-height: 64px; display: flex; align-items: center;
   }
-
   #list {
     padding: 8px 16px; font-size: 16px; line-height: 1.6;
-    background: #141414; max-height: 22vh; overflow-y: auto;
+    background: #141414; max-height: 20vh; overflow-y: auto;
   }
   #list .row { padding: 3px 0; border-bottom: 1px solid #262626; }
   #list .sc { color: #9e9e9e; }
 
-  /* ปุ่มใหญ่เต็มความกว้าง กดง่ายแม้มองไม่เห็น */
-  #controls { display: flex; gap: 2px; background: #000; }
+  #controls { display: none; gap: 2px; background: #000; }
   button {
-    flex: 1; padding: 24px 8px;
-    font-size: 21px; font-weight: 700; font-family: inherit;
-    color: #fff; background: #1565c0; border: none;
-    cursor: pointer;
+    flex: 1; padding: 26px 6px;
+    font-size: 19px; font-weight: 700; font-family: inherit;
+    color: #fff; background: #1565c0; border: none; cursor: pointer;
   }
   button:active { background: #0d47a1; }
-  button:disabled { background: #555; }
   button.on { background: #2e7d32; }
 </style>
 </head>
 <body>
 
-<div id="tapArea">
-  <video id="cam" playsinline autoplay muted></video>
-  <canvas id="overlay"></canvas>
-  <div id="hint">แตะที่หน้าจอเพื่อให้บอกสิ่งที่เห็น</div>
+<!-- ชั้นเริ่มต้น: ทั้งหน้าจอคือปุ่มเริ่ม คนตาบอดไม่ต้องหาปุ่ม -->
+<div id="startLayer" role="button" tabindex="0"
+     aria-label="แตะที่ใดก็ได้บนหน้าจอเพื่อเริ่มใช้งานตาทิพย์">
+  <div class="big" aria-hidden="true">👁</div>
+  <h1>ตาทิพย์</h1>
+  <p>แตะที่ใดก็ได้<br>บนหน้าจอเพื่อเริ่ม</p>
 </div>
 
-<div id="status">กดปุ่ม “เริ่มใช้งาน” ด้านล่างเพื่อเริ่ม</div>
-<div id="list">ยังไม่พบสิ่งของ</div>
+<div id="tapArea" role="button" tabindex="0"
+     aria-label="พื้นที่กล้อง แตะเพื่อให้บอกสิ่งที่เห็น">
+  <video id="cam" playsinline autoplay muted></video>
+  <canvas id="overlay" aria-hidden="true"></canvas>
+  <div id="hint" aria-hidden="true">แตะที่หน้าจอเพื่อให้บอกสิ่งที่เห็น</div>
+</div>
+
+<div id="status" role="status" aria-live="polite" aria-atomic="true">
+  แตะที่ใดก็ได้บนหน้าจอเพื่อเริ่ม
+</div>
+<div id="list" aria-hidden="true">ยังไม่พบสิ่งของ</div>
 
 <div id="controls">
-  <button id="btnStart">เริ่มใช้งาน</button>
-  <button id="btnAuto">โหมดอัตโนมัติ: ปิด</button>
+  <button id="btnStop" aria-label="หยุดการทำงาน">หยุด</button>
+  <button id="btnAuto" aria-label="โหมดอัตโนมัติ" aria-pressed="false">อัตโนมัติ: ปิด</button>
+  <button id="btnHelp" aria-label="ช่วยเหลือ ฟังวิธีใช้งาน">ช่วยเหลือ</button>
 </div>
 
-<!-- TensorFlow.js และโมเดล COCO-SSD โหลดจาก CDN -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
-
 <script src="data.js"></script>
 <script src="app.js"></script>
 </body>
