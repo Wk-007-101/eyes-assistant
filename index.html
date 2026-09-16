@@ -48,10 +48,13 @@
   #list .row { padding: 3px 0; border-bottom: 1px solid #262626; }
   #list .sc { color: #9e9e9e; }
 
-  #controls { display: none; gap: 2px; background: #000; }
+  #controls {
+    display: none; background: #000; gap: 2px;
+    grid-template-columns: 1fr 1fr;
+  }
   button {
     flex: 1; padding: 26px 6px;
-    font-size: 19px; font-weight: 700; font-family: inherit;
+    font-size: 20px; font-weight: 700; font-family: inherit;
     color: #fff; background: #1565c0; border: none; cursor: pointer;
   }
   button:active { background: #0d47a1; }
@@ -83,11 +86,13 @@
 <div id="controls">
   <button id="btnStop" aria-label="หยุดการทำงาน">หยุด</button>
   <button id="btnAuto" aria-label="โหมดอัตโนมัติ" aria-pressed="false">อัตโนมัติ: ปิด</button>
+  <button id="btnMode" aria-label="เปลี่ยนโหมดการตรวจจับ">โหมดแม่นยำ</button>
   <button id="btnHelp" aria-label="ช่วยเหลือ ฟังวิธีใช้งาน">ช่วยเหลือ</button>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js"></script>
 <script src="data.js"></script>
 <script src="app.js"></script>
 </body>

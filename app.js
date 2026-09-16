@@ -13,6 +13,8 @@
 
 let model = null, stream = null;
 let running = false, autoMode = false, started = false;
+let modeIndex = 0;              // ตำแหน่งในรายการ MODES
+let modelCache = {};            // เก็บโมเดลที่โหลดแล้ว ไม่ต้องโหลดซ้ำ
 let detectTimer = null;
 let lastSpoken = {};
 let currentDetections = [];
@@ -25,6 +27,7 @@ const statusEl = document.getElementById("status");
 const listEl   = document.getElementById("list");
 const btnStop  = document.getElementById("btnStop");
 const btnAuto  = document.getElementById("btnAuto");
+const btnMode  = document.getElementById("btnMode");
 const btnHelp  = document.getElementById("btnHelp");
 const tapArea  = document.getElementById("tapArea");
 const startLayer = document.getElementById("startLayer");
@@ -145,6 +148,32 @@ function describeDistance(bbox) {
   return DISTANCE[DISTANCE.length - 1].text;
 }
 
+/** แปลชื่อคลาส ImageNet เป็นไทย ถ้าไม่มีคำแปลคืนภาษาอังกฤษ */
+function thaiImageNet(raw) {
+  const low = raw.toLowerCase();
+  if (IMAGENET_TH[low]) return IMAGENET_TH[low];
+  for (const part of low.split(",")) {
+    const p = part.trim();
+    if (IMAGENET_TH[p]) return IMAGENET_TH[p];
+  }
+  return raw.split(",")[0].trim();
+}
+
+/** ประโยคสำหรับโหมดคำศัพท์กว้าง ไม่มีตำแหน่งเพราะจำแนกทั้งภาพ */
+function buildClassifySentence(c) {
+  const name = thaiImageNet(c.className);
+  const unsure = c.probability < CONFIG.unsureBelow ? MESSAGES.unsure : "";
+  const color = centerColor();
+  return [unsure, name, color].filter(Boolean).join(" ");
+}
+
+/** อ่านสีจากบริเวณกลางภาพ ใช้กับโหมดจำแนกทั้งภาพ */
+function centerColor() {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw) return "";
+  return readColor([vw * 0.3, vh * 0.3, vw * 0.4, vh * 0.4]);
+}
+
 function buildSentence(det) {
   const name   = TH_LABELS[det.class] || det.class;
   const alert  = PRIORITY[det.class] !== undefined ? PRIORITY[det.class] : "";
@@ -183,10 +212,23 @@ function stopCamera() {
   stream = null;
 }
 
-async function loadModel() {
+function currentMode() { return MODES[modeIndex]; }
+
+/**
+ * โหลดโมเดลของโหมดที่ระบุ โหลดครั้งเดียวแล้วเก็บไว้ใช้ซ้ำ
+ * โหมด detect ใช้ COCO-SSD / โหมด classify ใช้ MobileNet
+ */
+async function loadModelFor(mode) {
+  if (modelCache[mode.id]) return modelCache[mode.id];
   try { await tf.setBackend("webgl"); }
   catch (e) { console.warn("ใช้ webgl ไม่ได้", e); }
-  model = await cocoSsd.load({ base: CONFIG.modelBase });
+
+  const m = mode.type === "detect"
+    ? await cocoSsd.load({ base: mode.base })
+    : await mobilenet.load({ version: 2, alpha: 1.0 });
+
+  modelCache[mode.id] = m;
+  return m;
 }
 
 function areaOf(d) { return d.bbox[2] * d.bbox[3]; }
@@ -215,15 +257,61 @@ function dedupe(dets) {
 
 async function detectLoop() {
   if (!running || !model) return;
+  const mode = currentMode();
   try {
-    const raw = await model.detect(video, 12);
-    currentDetections = dedupe(raw.filter(d => d.score >= CONFIG.minScore))
-                          .sort((a, b) => areaOf(b) - areaOf(a));
-    draw(currentDetections);
-    if (autoMode) autoAnnounce(currentDetections);
-    renderList(currentDetections);
+    if (mode.type === "detect") {
+      const raw = await model.detect(video, 12);
+      currentDetections = dedupe(raw.filter(d => d.score >= CONFIG.minScore))
+                            .sort((a, b) => areaOf(b) - areaOf(a));
+      draw(currentDetections);
+      if (autoMode) autoAnnounce(currentDetections);
+      renderList(currentDetections);
+    } else {
+      const res = await model.classify(video, 3);
+      currentDetections = res.filter(c => c.probability >= 0.12);
+      drawCenterGuide();
+      if (autoMode) autoAnnounceClassify(currentDetections);
+      renderListClassify(currentDetections);
+    }
   } catch (e) { console.error(e); }
   detectTimer = setTimeout(detectLoop, CONFIG.detectInterval);
+}
+
+/** โหมดคำศัพท์กว้าง พูดอันดับหนึ่งเมื่อเปลี่ยนจากครั้งก่อน */
+let lastClassName = "", lastClassAt = 0;
+function autoAnnounceClassify(list) {
+  if (!list.length || speechSynthesis.speaking) return;
+  const top = list[0];
+  const now = Date.now();
+  if (top.className === lastClassName &&
+      now - lastClassAt < CONFIG.repeatCooldown) return;
+  lastClassName = top.className; lastClassAt = now;
+  buzz("found");
+  speak(buildClassifySentence(top));
+}
+
+/** กรอบนำสายตาตรงกลาง บอกผู้ใช้ว่าให้เล็งวัตถุไว้ตรงนี้ */
+function drawCenterGuide() {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw) return;
+  if (canvas.width !== vw || canvas.height !== vh) {
+    canvas.width = vw; canvas.height = vh;
+  }
+  ctx.clearRect(0, 0, vw, vh);
+  ctx.strokeStyle = "#ffe600";
+  ctx.lineWidth = Math.max(4, vw / 200);
+  ctx.setLineDash([vw / 30, vw / 40]);
+  ctx.strokeRect(vw * 0.15, vh * 0.2, vw * 0.7, vh * 0.6);
+  ctx.setLineDash([]);
+}
+
+function renderListClassify(list) {
+  if (!list.length) { listEl.textContent = "ยังไม่พบสิ่งของ"; return; }
+  listEl.innerHTML = list.map(c => {
+    const u = c.probability < CONFIG.unsureBelow ? "? " : "";
+    return `<div class="row">${u}<b>${thaiImageNet(c.className)}</b> `
+         + `<span class="sc">${(c.probability * 100) | 0}%</span></div>`;
+  }).join("");
 }
 
 function rank(dets) {
@@ -250,6 +338,10 @@ function announceNow() {
   speechSynthesis.cancel();
   if (!currentDetections.length) { speak(MESSAGES.nothing, true); return; }
   buzz("found");
+  if (currentMode().type === "classify") {
+    currentDetections.slice(0, 2).forEach(c => speak(buildClassifySentence(c)));
+    return;
+  }
   const now = Date.now();
   rank(currentDetections).slice(0, CONFIG.maxSpeakTap).forEach(d => {
     lastSpoken[d.class] = now;
@@ -310,7 +402,8 @@ async function bootstrap() {
   buzz("start");
   speak(MESSAGES.loading);
 
-  try { await loadModel(); }
+  modeIndex = Math.max(0, MODES.findIndex(m => m.id === DEFAULT_MODE));
+  try { model = await loadModelFor(currentMode()); }
   catch (e) {
     console.error(e); buzz("error");
     speak(MESSAGES.modelFail, true); started = false; return;
@@ -320,10 +413,12 @@ async function bootstrap() {
   if (!ok) { started = false; return; }
 
   startLayer.style.display = "none";
-  document.getElementById("controls").style.display = "flex";
+  document.getElementById("controls").style.display = "grid";
   running = true;
+  btnMode.textContent = currentMode().label;
   speak(MESSAGES.cameraOn);
   speakLines(MESSAGES.tutorial, false);
+  speak(currentMode().say);
   detectLoop();
 }
 
@@ -389,6 +484,34 @@ function doHelp() {
   speakLines(MESSAGES.tutorial, true);
 }
 
+/** วนสลับโหมดถัดไป โหลดโมเดลใหม่ถ้ายังไม่เคยโหลด */
+async function doMode() {
+  if (!running) return;
+  buzz("toggle");
+  modeIndex = (modeIndex + 1) % MODES.length;
+  const mode = currentMode();
+  btnMode.textContent = mode.label;
+  btnMode.setAttribute("aria-label", "โหมดปัจจุบันคือ " + mode.label);
+
+  speak(mode.label, true);
+  if (!modelCache[mode.id]) speak("กำลังโหลดโมเดล กรุณารอสักครู่");
+
+  try { model = await loadModelFor(mode); }
+  catch (e) {
+    console.error(e); buzz("error");
+    speak("โหลดโมเดลไม่สำเร็จ กลับไปใช้โหมดเดิม", true);
+    modeIndex = (modeIndex - 1 + MODES.length) % MODES.length;
+    model = modelCache[currentMode().id];
+    btnMode.textContent = currentMode().label;
+    return;
+  }
+
+  lastSpoken = {}; lastClassName = ""; currentDetections = [];
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  speak(mode.say);
+}
+
+bindButton(btnMode, MESSAGES.btnMode, doMode);
 bindButton(btnStop, MESSAGES.btnStop, doStop);
 bindButton(btnAuto, MESSAGES.btnAuto, doAuto);
 bindButton(btnHelp, MESSAGES.btnHelp, doHelp);
